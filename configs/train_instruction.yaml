@@ -1,0 +1,34 @@
+# Training config for Stage 2: Instruction Tuning
+# Goal: Learn how to interact with users
+
+stage: instruction
+learning_rate: 1.0e-04
+min_learning_rate: 1.0e-05
+weight_decay: 0.1
+beta1: 0.9
+beta2: 0.95
+grad_clip: 1.0
+warmup_steps: 200
+max_steps: 20000
+
+batch_size: 32
+gradient_accumulation_steps: 4
+
+lr_schedule: cosine
+log_interval: 10
+eval_interval: 500
+save_interval: 2000
+eval_steps: 100
+
+output_dir: outputs
+checkpoint_dir: checkpoints/instruction
+
+device: auto
+dtype: float32
+compile_model: false
+
+# Resume from foundation stage
+resume_from: checkpoints/foundation/best.pt
+
+seed: 42
+use_wandb: false
