@@ -66,18 +66,21 @@ class TrainingConfig:
                 "learning_rate": 3e-4,
                 "max_steps": 50000,
                 "warmup_steps": 500,
+                "checkpoint_dir": "checkpoints/foundation",
             },
             "instruction": {
                 "stage": "instruction",
                 "learning_rate": 1e-4,
                 "max_steps": 20000,
                 "warmup_steps": 200,
+                "checkpoint_dir": "checkpoints/instruction",
             },
             "samuel": {
                 "stage": "samuel",
                 "learning_rate": 5e-5,
                 "max_steps": 5000,
                 "warmup_steps": 100,
+                "checkpoint_dir": "checkpoints/samuel",
             },
         }
         if stage not in defaults:

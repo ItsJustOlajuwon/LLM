@@ -167,7 +167,7 @@ def run_benchmarks(
             categories[cat] = []
         categories[cat].append(r["tokens_per_second"])
 
-    print(f"\nGeneration speed by category:")
+    print("\nGeneration speed by category:")
     for cat, speeds in sorted(categories.items()):
         avg = sum(speeds) / len(speeds)
         print(f"  {cat}: {avg:.1f} tokens/s (avg)")

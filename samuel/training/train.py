@@ -90,6 +90,7 @@ class Trainer:
         # Training state
         self.step = 0
         self.best_val_loss = float("inf")
+        self.last_val_loss = float("inf")
         self.train_losses = []
 
         # Mixed precision
@@ -291,7 +292,7 @@ class Trainer:
                 if self.use_amp:
                     self.scaler.unscale_(self.optimizer)
 
-                grad_norm = nn.utils.clip_grad_norm_(
+                nn.utils.clip_grad_norm_(
                     self.model.parameters(), self.config.grad_clip
                 )
 
@@ -348,6 +349,8 @@ class Trainer:
                 if is_best:
                     self.best_val_loss = val_loss
 
+                self.last_val_loss = val_loss
+
                 print(f"  ─── eval step {self.step}: val_loss={val_loss:.4f} {'(best!)' if is_best else ''}")
 
                 if self.wandb_run:
@@ -356,7 +359,7 @@ class Trainer:
 
             # Checkpointing
             if self.step % self.config.save_interval == 0:
-                self.save_checkpoint(is_best=(val_loss < self.best_val_loss) if 'val_loss' in dir() else False)
+                self.save_checkpoint(is_best=self.last_val_loss <= self.best_val_loss)
 
         # Final save
         self.save_checkpoint()
@@ -389,6 +392,11 @@ def main():
     parser.add_argument("--model-size", type=str, default="medium", choices=["small", "medium", "large"])
     parser.add_argument("--use-wandb", action="store_true")
 
+    parser.add_argument(
+        "--tokenizer", type=str, default="outputs/tokenizer/tokenizer.json",
+        help="Path to tokenizer (used to auto-detect vocab size)"
+    )
+
     args = parser.parse_args()
 
     # Set random seed
@@ -401,6 +409,18 @@ def main():
     else:
         size_map = {"small": ModelConfig.small, "medium": ModelConfig.medium, "large": ModelConfig.large}
         model_config = size_map[args.model_size]()
+
+    # Auto-detect vocab size from tokenizer
+    tokenizer_path = Path(args.tokenizer)
+    if tokenizer_path.exists():
+        from tokenizers import Tokenizer
+        tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        actual_vocab = tokenizer.get_vocab_size()
+        if actual_vocab != model_config.vocab_size:
+            print(f"Adjusting vocab_size: {model_config.vocab_size} -> {actual_vocab} (from tokenizer)")
+            model_config.vocab_size = actual_vocab
+    else:
+        print(f"Warning: Tokenizer not found at {tokenizer_path}, using default vocab_size={model_config.vocab_size}")
 
     # Load or create training config
     if args.train_config:

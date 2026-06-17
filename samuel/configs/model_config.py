@@ -1,7 +1,6 @@
 """Model architecture configuration."""
 
 from dataclasses import dataclass, field
-from typing import Optional
 import yaml
 
 

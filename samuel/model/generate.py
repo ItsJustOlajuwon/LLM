@@ -33,7 +33,6 @@ def generate(
         Generated token IDs, shape (1, T + max_new_tokens)
     """
     model.eval()
-    device = input_ids.device
     max_seq_len = model.config.max_seq_len
 
     for _ in range(max_new_tokens):

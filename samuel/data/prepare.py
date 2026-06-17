@@ -11,7 +11,6 @@ import argparse
 import json
 import numpy as np
 from pathlib import Path
-from tqdm import tqdm
 from typing import Iterator
 
 from tokenizers import Tokenizer
@@ -98,36 +97,59 @@ def tokenize_and_save(
     split: str = "train",
     max_tokens: int = None,
 ):
-    """Tokenize texts and save as memory-mapped binary file."""
+    """Tokenize texts and save as memory-mapped binary file.
+
+    Uses chunked writing to avoid loading all tokens into memory at once.
+    """
     output_path.mkdir(parents=True, exist_ok=True)
     bin_path = output_path / f"{split}.bin"
+    tmp_path = output_path / f"{split}.tmp.bin"
 
-    # First pass: collect all token IDs
-    all_tokens = []
+    # Write tokens in chunks to a temporary file to avoid MemoryError
+    CHUNK_SIZE = 500_000  # flush every 500k tokens
+    chunk = []
     total = 0
 
-    for text in texts:
-        encoded = tokenizer.encode(text)
-        tokens = encoded.ids
-        all_tokens.extend(tokens)
-        total += len(tokens)
+    with open(tmp_path, "wb") as f:
+        for text in texts:
+            encoded = tokenizer.encode(text)
+            tokens = encoded.ids
+            chunk.extend(tokens)
+            total += len(tokens)
 
-        if max_tokens and total >= max_tokens:
-            all_tokens = all_tokens[:max_tokens]
-            break
+            # Flush chunk to disk
+            if len(chunk) >= CHUNK_SIZE:
+                arr = np.array(chunk, dtype=np.uint16)
+                f.write(arr.tobytes())
+                chunk = []
 
-    if not all_tokens:
+                # Progress indicator
+                if total % 5_000_000 == 0:
+                    print(f"    ... {total:,} tokens processed")
+
+            if max_tokens and total >= max_tokens:
+                # Trim to max
+                chunk = chunk[:max(0, max_tokens - (total - len(chunk)))]
+                total = max_tokens
+                break
+
+        # Write remaining chunk
+        if chunk:
+            arr = np.array(chunk, dtype=np.uint16)
+            f.write(arr.tobytes())
+
+    if total == 0:
         print(f"  Warning: No tokens generated for {output_path}")
+        tmp_path.unlink(missing_ok=True)
         return 0
 
-    # Save as memory-mapped file
-    arr = np.array(all_tokens, dtype=np.uint16)
-    mmap = np.memmap(str(bin_path), dtype=np.uint16, mode="w+", shape=arr.shape)
-    mmap[:] = arr[:]
-    mmap.flush()
+    # Rename tmp to final
+    if bin_path.exists():
+        bin_path.unlink()
+    tmp_path.rename(bin_path)
 
-    print(f"  Saved {len(arr):,} tokens to {bin_path}")
-    return len(arr)
+    print(f"  Saved {total:,} tokens to {bin_path}")
+    return total
 
 
 def prepare_dataset(
@@ -199,24 +221,29 @@ def prepare_dataset(
         # Create a small validation split by taking the last val_ratio of tokens
         if n_tokens > 0:
             train_path = cat_output / "train.bin"
-            data = np.memmap(str(train_path), dtype=np.uint16, mode="r")
-            val_size = int(len(data) * val_ratio)
+            file_size = train_path.stat().st_size
+            total_tokens = file_size // 2  # uint16 = 2 bytes per token
+            val_size = int(total_tokens * val_ratio)
+
             if val_size > seq_len:
-                val_data = np.array(data[-val_size:])
-                train_data = np.array(data[:-val_size])
-
-                # Rewrite train
-                mmap = np.memmap(str(train_path), dtype=np.uint16, mode="w+", shape=train_data.shape)
-                mmap[:] = train_data[:]
-                mmap.flush()
-
-                # Write val
                 val_path = cat_output / "val.bin"
-                mmap = np.memmap(str(val_path), dtype=np.uint16, mode="w+", shape=val_data.shape)
-                mmap[:] = val_data[:]
-                mmap.flush()
+                train_size = total_tokens - val_size
 
-                print(f"  Split: {len(train_data):,} train, {len(val_data):,} val tokens")
+                # Read only the val portion from the end of the file
+                val_offset = train_size * 2  # byte offset
+                with open(train_path, "rb") as f:
+                    f.seek(val_offset)
+                    val_bytes = f.read()
+
+                # Write val split
+                with open(val_path, "wb") as f:
+                    f.write(val_bytes)
+
+                # Truncate train file to remove val portion
+                with open(train_path, "r+b") as f:
+                    f.truncate(val_offset)
+
+                print(f"  Split: {train_size:,} train, {val_size:,} val tokens")
 
     # Summary
     print(f"\n{'=' * 60}")
