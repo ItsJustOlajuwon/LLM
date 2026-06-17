@@ -70,7 +70,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
     loaded = ModelConfig.load(str(path))
     assert loaded.d_model == config.d_model
     assert loaded.n_layers == config.n_layers
-    print(f"Saved and loaded config: OK")
+    print("Saved and loaded config: OK")
 
 # Test 5: Training step
 print("\n" + "=" * 50)

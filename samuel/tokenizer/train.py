@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Iterator
 
 from tokenizers import Tokenizer, models, trainers, pre_tokenizers, decoders, processors
-from tokenizers.normalizers import NFKC, Sequence as NormSequence, Lowercase
 
 
 def get_training_corpus(data_paths: list[str], max_texts: int = 500000) -> Iterator[str]:
