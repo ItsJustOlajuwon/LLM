@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "samuel"
+version = "2.0.0"
+description = "Project Samuel V2: Building an AI Brother From Scratch"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.1.0",
+    "numpy>=1.24.0",
+    "datasets>=2.14.0",
+    "tokenizers>=0.15.0",
+    "tqdm>=4.65.0",
+    "wandb>=0.16.0",
+    "pyyaml>=6.0",
+    "sentencepiece>=0.1.99",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+samuel-train-tokenizer = "samuel.tokenizer.train:main"
+samuel-prepare-data = "samuel.data.prepare:main"
+samuel-train = "samuel.training.train:main"
+samuel-benchmark = "samuel.benchmarks.run:main"
+samuel-generate = "samuel.model.generate:main"
+
+[tool.setuptools.packages.find]
+include = ["samuel*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

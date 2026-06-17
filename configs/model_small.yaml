@@ -1,0 +1,16 @@
+# Samuel V2 — Small Model (~10M parameters)
+# For quick experiments and debugging
+
+vocab_size: 32000
+d_model: 256
+n_heads: 4
+n_layers: 6
+d_ff: 1024
+max_seq_len: 256
+dropout: 0.1
+pos_encoding: rotary
+norm_type: rmsnorm
+norm_eps: 1.0e-06
+activation: swiglu
+tie_embeddings: true
+bias: false
