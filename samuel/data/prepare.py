@@ -12,6 +12,7 @@ import json
 import numpy as np
 from pathlib import Path
 from typing import Iterator
+import os
 
 from tokenizers import Tokenizer
 
@@ -47,10 +48,27 @@ def load_and_process_source(
 
     print(f"  Loading {name} from {path}...")
     try:
+        # Use cache_dir to avoid re-downloading and enable faster loading
+        cache_dir = Path("data/sources") / name / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
         if subset:
-            ds = load_dataset(path, subset, split="train", streaming=True)
+            ds = load_dataset(
+                path, 
+                subset, 
+                split="train", 
+                streaming=True,
+                cache_dir=str(cache_dir),
+                trust_remote_code=True
+            )
         else:
-            ds = load_dataset(path, split="train", streaming=True)
+            ds = load_dataset(
+                path, 
+                split="train", 
+                streaming=True,
+                cache_dir=str(cache_dir),
+                trust_remote_code=True
+            )
     except Exception as e:
         print(f"  Error loading {name}: {e}")
         return
@@ -60,31 +78,35 @@ def load_and_process_source(
         if max_s and count >= max_s:
             break
 
-        text = example.get(text_field, "")
+        try:
+            text = example.get(text_field, "")
 
-        # Handle different data formats
-        if isinstance(text, list):
-            # Conversation format (list of messages)
-            parts = []
-            for msg in text:
-                if isinstance(msg, dict):
-                    role = msg.get("role", "user")
-                    content = msg.get("content", "")
-                    if role == "user":
-                        parts.append(f"<|user|>{content}<|end|>")
-                    elif role == "assistant":
-                        parts.append(f"<|samuel|>{content}<|end|>")
+            # Handle different data formats
+            if isinstance(text, list):
+                # Conversation format (list of messages)
+                parts = []
+                for msg in text:
+                    if isinstance(msg, dict):
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")
+                        if role == "user":
+                            parts.append(f"<|user|>{content}<|end|>")
+                        elif role == "assistant":
+                            parts.append(f"<|samuel|>{content}<|end|>")
+                        else:
+                            parts.append(f"<|system|>{content}<|end|>")
                     else:
-                        parts.append(f"<|system|>{content}<|end|>")
-                else:
-                    parts.append(str(msg))
-            text = "\n".join(parts)
-        elif not isinstance(text, str):
-            text = str(text)
+                        parts.append(str(msg))
+                text = "\n".join(parts)
+            elif not isinstance(text, str):
+                text = str(text)
 
-        if len(text) > 50:
-            yield text
-            count += 1
+            if len(text) > 50:
+                yield text
+                count += 1
+        except Exception as e:
+            print(f"  Warning: Error processing example {count} in {name}: {e}")
+            continue
 
     print(f"  {name}: yielded {count} samples")
 
@@ -100,6 +122,7 @@ def tokenize_and_save(
     """Tokenize texts and save as memory-mapped binary file.
 
     Uses chunked writing to avoid loading all tokens into memory at once.
+    Implements batch encoding for better performance.
     """
     output_path.mkdir(parents=True, exist_ok=True)
     bin_path = output_path / f"{split}.bin"
@@ -107,32 +130,47 @@ def tokenize_and_save(
 
     # Write tokens in chunks to a temporary file to avoid MemoryError
     CHUNK_SIZE = 500_000  # flush every 500k tokens
+    BATCH_SIZE = 100  # batch encode texts for better throughput
+    
     chunk = []
     total = 0
+    batch = []
 
     with open(tmp_path, "wb") as f:
         for text in texts:
-            encoded = tokenizer.encode(text)
-            tokens = encoded.ids
-            chunk.extend(tokens)
-            total += len(tokens)
+            batch.append(text)
+            
+            # Process batch when it reaches batch size
+            if len(batch) >= BATCH_SIZE:
+                encodings = tokenizer.encode_batch(batch)
+                for encoded in encodings:
+                    tokens = encoded.ids
+                    chunk.extend(tokens)
+                    total += len(tokens)
+                
+                batch = []
+                
+                # Flush chunk to disk
+                if len(chunk) >= CHUNK_SIZE:
+                    arr = np.array(chunk, dtype=np.uint16)
+                    f.write(arr.tobytes())
+                    chunk = []
 
-            # Flush chunk to disk
-            if len(chunk) >= CHUNK_SIZE:
-                arr = np.array(chunk, dtype=np.uint16)
-                f.write(arr.tobytes())
-                chunk = []
+                    # Progress indicator
+                    if total % 5_000_000 == 0:
+                        print(f"    ... {total:,} tokens processed")
 
-                # Progress indicator
-                if total % 5_000_000 == 0:
-                    print(f"    ... {total:,} tokens processed")
-
-            if max_tokens and total >= max_tokens:
-                # Trim to max
-                chunk = chunk[:max(0, max_tokens - (total - len(chunk)))]
-                total = max_tokens
-                break
-
+                if max_tokens and total >= max_tokens:
+                    break
+        
+        # Process remaining batch
+        if batch:
+            encodings = tokenizer.encode_batch(batch)
+            for encoded in encodings:
+                tokens = encoded.ids
+                chunk.extend(tokens)
+                total += len(tokens)
+        
         # Write remaining chunk
         if chunk:
             arr = np.array(chunk, dtype=np.uint16)
