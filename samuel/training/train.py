@@ -14,6 +14,7 @@ import math
 import time
 from pathlib import Path
 from typing import Optional
+import sys
 
 import torch
 import torch.nn as nn
@@ -66,11 +67,15 @@ class Trainer:
         self.optimizer = self._create_optimizer()
 
         # DataLoader
+        # Windows doesn't support multiprocessing with pickling large datasets
+        # Set num_workers=0 on Windows to avoid pickle errors
+        num_workers = 0 if sys.platform == "win32" else 2
+        
         self.train_loader = DataLoader(
             train_dataset,
             batch_size=train_config.batch_size,
             shuffle=True,
-            num_workers=2,
+            num_workers=num_workers,
             pin_memory=(self.device.type == "cuda"),
             drop_last=True,
         )
@@ -80,7 +85,7 @@ class Trainer:
                 val_dataset,
                 batch_size=train_config.batch_size,
                 shuffle=False,
-                num_workers=1,
+                num_workers=num_workers,
                 pin_memory=(self.device.type == "cuda"),
                 drop_last=True,
             )
