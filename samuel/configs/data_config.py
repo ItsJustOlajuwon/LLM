@@ -58,7 +58,7 @@ class DataConfig:
             "path": "sedthh/gutenberg_english",
             "text_field": "TEXT",
             "weight": 0.2,
-            "max_samples": 50000,
+            "max_samples": 20000,
         },
     ])
 
