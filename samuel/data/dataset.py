@@ -32,9 +32,18 @@ class SamuelDataset(Dataset):
             )
 
         # Memory map the file for efficient random access
-        self.data = np.memmap(str(mmap_path), dtype=np.uint16, mode="r")
-        self.n_tokens = len(self.data)
-        self.n_samples = self.n_tokens // seq_len
+        try:
+            self.data = np.memmap(str(mmap_path), dtype=np.uint16, mode="r")
+            self.n_tokens = len(self.data)
+            self.n_samples = self.n_tokens // seq_len
+        except Exception as e:
+            raise RuntimeError(f"Failed to load memmap from {mmap_path}: {e}")
+
+        if self.n_samples == 0:
+            raise ValueError(
+                f"Not enough tokens ({self.n_tokens}) for seq_len={seq_len}. "
+                f"Need at least {seq_len + 1} tokens."
+            )
 
         print(f"Loaded {split} split: {self.n_tokens:,} tokens, {self.n_samples:,} samples")
 
@@ -42,14 +51,20 @@ class SamuelDataset(Dataset):
         return self.n_samples
 
     def __getitem__(self, idx: int) -> dict:
+        if idx < 0 or idx >= self.n_samples:
+            raise IndexError(f"Index {idx} out of range [0, {self.n_samples})")
+        
         start = idx * self.seq_len
         end = start + self.seq_len + 1  # +1 for target shift
 
-        chunk = self.data[start:end].astype(np.int64)
-        x = torch.from_numpy(chunk[:-1])
-        y = torch.from_numpy(chunk[1:])
+        try:
+            chunk = self.data[start:end].astype(np.int64)
+            x = torch.from_numpy(chunk[:-1])
+            y = torch.from_numpy(chunk[1:])
 
-        return {"input_ids": x, "targets": y}
+            return {"input_ids": x, "targets": y}
+        except Exception as e:
+            raise RuntimeError(f"Error loading sample {idx}: {e}")
 
 
 class StreamingSamuelDataset(Dataset):
@@ -103,11 +118,18 @@ class StreamingSamuelDataset(Dataset):
         for cat, weight in self.categories.items():
             cat_path = self.data_dir / cat / f"{split}.bin"
             if cat_path.exists():
-                data = np.memmap(str(cat_path), dtype=np.uint16, mode="r")
-                self.category_data[cat] = data
-                self.category_sizes[cat] = len(data) // seq_len
-                total_tokens += len(data)
-                print(f"  [{cat}] {len(data):,} tokens ({weight:.0%} weight)")
+                try:
+                    data = np.memmap(str(cat_path), dtype=np.uint16, mode="r")
+                    n_samples = len(data) // seq_len
+                    if n_samples > 0:
+                        self.category_data[cat] = data
+                        self.category_sizes[cat] = n_samples
+                        total_tokens += len(data)
+                        print(f"  [{cat}] {len(data):,} tokens ({weight:.0%} weight)")
+                    else:
+                        print(f"  [{cat}] Insufficient tokens ({len(data)}) for seq_len={seq_len}, skipping")
+                except Exception as e:
+                    print(f"  [{cat}] Error loading {cat_path}: {e}, skipping")
             else:
                 print(f"  [{cat}] Not found at {cat_path}, skipping")
 
@@ -146,8 +168,11 @@ class StreamingSamuelDataset(Dataset):
         else:
             start = np.random.randint(0, max_start)
 
-        chunk = data[start: start + self.seq_len + 1].astype(np.int64)
-        x = torch.from_numpy(chunk[:-1])
-        y = torch.from_numpy(chunk[1:])
+        try:
+            chunk = data[start: start + self.seq_len + 1].astype(np.int64)
+            x = torch.from_numpy(chunk[:-1])
+            y = torch.from_numpy(chunk[1:])
 
-        return {"input_ids": x, "targets": y}
+            return {"input_ids": x, "targets": y}
+        except Exception as e:
+            raise RuntimeError(f"Error loading sample from {cat}: {e}")
