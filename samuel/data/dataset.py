@@ -23,7 +23,6 @@ class SamuelDataset(Dataset):
         self.data_path = Path(data_path)
         self.split = split
 
-        # Load memory-mapped data
         mmap_path = self.data_path / f"{split}.bin"
         if not mmap_path.exists():
             raise FileNotFoundError(
@@ -31,7 +30,6 @@ class SamuelDataset(Dataset):
                 f"Run 'samuel-prepare-data' first."
             )
 
-        # Memory map the file for efficient random access
         try:
             self.data = np.memmap(str(mmap_path), dtype=np.uint16, mode="r")
             self.n_tokens = len(self.data)
@@ -53,28 +51,25 @@ class SamuelDataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         if idx < 0 or idx >= self.n_samples:
             raise IndexError(f"Index {idx} out of range [0, {self.n_samples})")
-        
+
         start = idx * self.seq_len
-        end = start + self.seq_len + 1  # +1 for target shift
+        end = start + self.seq_len + 1
 
-        try:
-            chunk = self.data[start:end].astype(np.int64)
-            x = torch.from_numpy(chunk[:-1])
-            y = torch.from_numpy(chunk[1:])
+        chunk = self.data[start:end].astype(np.int64)
+        x = torch.from_numpy(chunk[:-1])
+        y = torch.from_numpy(chunk[1:])
 
-            return {"input_ids": x, "targets": y}
-        except Exception as e:
-            raise RuntimeError(f"Error loading sample {idx}: {e}")
+        return {"input_ids": x, "targets": y}
 
 
 class StreamingSamuelDataset(Dataset):
     """Dataset that samples from multiple category files with given weights.
 
-    Used during training to implement the layered dataset strategy:
-    - General Language: 40%
-    - Conversation: 25%
-    - Engineering: 25%
-    - Samuel Identity: 10%
+    Used during training:
+    - General Language
+    - Conversation
+    - Engineering
+    - Samuel Identity
     """
 
     def __init__(
@@ -88,7 +83,6 @@ class StreamingSamuelDataset(Dataset):
         self.data_dir = Path(data_dir)
         self.stage = stage
 
-        # Define which categories are used in each stage
         stage_categories = {
             "foundation": {
                 "general": 0.55,
@@ -113,35 +107,41 @@ class StreamingSamuelDataset(Dataset):
         self.category_data = {}
         self.category_sizes = {}
 
-        # Load available categories
         total_tokens = 0
+
         for cat, weight in self.categories.items():
             cat_path = self.data_dir / cat / f"{split}.bin"
-            if cat_path.exists():
-                try:
-                    data = np.memmap(str(cat_path), dtype=np.uint16, mode="r")
-                    n_samples = len(data) // seq_len
-                    if n_samples > 0:
-                        self.category_data[cat] = data
-                        self.category_sizes[cat] = n_samples
-                        total_tokens += len(data)
-                        print(f"  [{cat}] {len(data):,} tokens ({weight:.0%} weight)")
-                    else:
-                        print(f"  [{cat}] Insufficient tokens ({len(data)}) for seq_len={seq_len}, skipping")
-                except Exception as e:
-                    print(f"  [{cat}] Error loading {cat_path}: {e}, skipping")
-            else:
-                print(f"  [{cat}] Not found at {cat_path}, skipping")
+
+            if not cat_path.exists():
+                print(f"  [{cat}] Missing: {cat_path}")
+                continue
+
+            try:
+                data = np.memmap(str(cat_path), dtype=np.uint16, mode="r")
+                n_samples = len(data) // seq_len
+
+                if n_samples <= 0:
+                    print(f"  [{cat}] Too small for seq_len={seq_len}")
+                    continue
+
+                self.category_data[cat] = data
+                self.category_sizes[cat] = n_samples
+                total_tokens += len(data)
+
+                print(f"  [{cat}] {len(data):,} tokens ({weight:.0%})")
+
+            except Exception as e:
+                print(f"  [{cat}] Failed loading: {e}")
 
         if not self.category_data:
             raise FileNotFoundError(
-                f"No processed data found in {data_dir}. Run 'samuel-prepare-data' first."
+                f"No valid datasets found in {self.data_dir}"
             )
 
-        # Normalize weights to available categories
         available_weight = sum(
             w for c, w in self.categories.items() if c in self.category_data
         )
+
         self.weights = {
             c: w / available_weight
             for c, w in self.categories.items()
@@ -149,31 +149,32 @@ class StreamingSamuelDataset(Dataset):
         }
 
         self.total_samples = sum(self.category_sizes.values())
+
         print(f"  Total: {total_tokens:,} tokens, {self.total_samples:,} samples")
+
+        # 🔥 single RNG for speed + stability
+        self.rng = np.random.default_rng()
 
     def __len__(self) -> int:
         return self.total_samples
 
     def __getitem__(self, idx: int) -> dict:
-        # Sample a category based on weights
         categories = list(self.weights.keys())
         weights = list(self.weights.values())
-        cat = np.random.choice(categories, p=weights)
 
-        # Random sample from the chosen category
+        cat = self.rng.choice(categories, p=weights)
         data = self.category_data[cat]
+
         max_start = len(data) - self.seq_len - 1
+
         if max_start <= 0:
             start = 0
         else:
-            rng = np.random.default_rng()
-            start = int(rng.integers(0, max_start, dtype=np.int64))
+            start = self.rng.integers(0, max_start)
 
-        try:
-            chunk = data[start: start + self.seq_len + 1].astype(np.int64)
-            x = torch.from_numpy(chunk[:-1])
-            y = torch.from_numpy(chunk[1:])
+        chunk = data[start:start + self.seq_len + 1].astype(np.int64)
 
-            return {"input_ids": x, "targets": y}
-        except Exception as e:
-            raise RuntimeError(f"Error loading sample from {cat}: {e}")
+        x = torch.from_numpy(chunk[:-1])
+        y = torch.from_numpy(chunk[1:])
+
+        return {"input_ids": x, "targets": y}
