@@ -21,7 +21,7 @@ save_interval: 2000
 eval_steps: 100
 
 output_dir: outputs
-checkpoint_dir: checkpoints/foundation
+checkpoint_dir: outputs/checkpoints/foundation
 
 device: auto
 dtype: float32
