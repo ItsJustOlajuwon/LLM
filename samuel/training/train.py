@@ -212,6 +212,7 @@ class Trainer:
 
         self.model.train()
         return np.mean(losses) if losses else float("nan")
+        self.save_checkpoint(is_best=True)
 
     def save_checkpoint(self, is_best: bool = False):
         """Save training checkpoint."""
@@ -259,8 +260,10 @@ class Trainer:
         print("=" * 60 + "\n")
 
         # Resume if specified
-        if self.config.resume_from:
+        if self.config.resume_from and Path(self.config.resume_from).exists():
             self.load_checkpoint(self.config.resume_from)
+        else:
+            print("No checkpoint found — starting fresh")
 
         self.model.train()
         data_iter = iter(self.train_loader)
@@ -315,7 +318,7 @@ class Trainer:
             self.step += 1
 
             # Logging
-            if self.step % self.config.log_interval == 0:
+            if self.step > 0 and self.step % self.config.eval_interval == 0:
                 elapsed = time.time() - start_time
                 tokens_per_sec = (
                     self.config.log_interval
@@ -363,6 +366,11 @@ class Trainer:
                     wandb.log({"val/loss": val_loss, "val/step": self.step})
 
             # Checkpointing
+            is_best = False
+            if self.val_loader is not None and self.last_val_loss < self.best_val_loss:
+                self.best_val_loss = self.last_val_loss
+                is_best = True
+            
             if self.step % self.config.save_interval == 0:
                 self.save_checkpoint(is_best=self.last_val_loss <= self.best_val_loss)
 
