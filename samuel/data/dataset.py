@@ -166,7 +166,8 @@ class StreamingSamuelDataset(Dataset):
         if max_start <= 0:
             start = 0
         else:
-            start = np.random.randint(0, max_start)
+            rng = np.random.default_rng()
+            start = int(rng.integers(0, max_start, dtype=np.int64))
 
         try:
             chunk = data[start: start + self.seq_len + 1].astype(np.int64)
