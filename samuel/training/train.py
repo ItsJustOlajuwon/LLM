@@ -26,6 +26,11 @@ from samuel.configs.training_config import TrainingConfig
 from samuel.model.transformer import SamuelModel
 from samuel.data.dataset import StreamingSamuelDataset
 
+print(f"DEBUG step={self.step}, max_steps={self.config.max_steps}")
+print("DEBUG: dataset length =", len(self.train_loader))
+print("DEBUG: first batch test")
+batch = next(iter(self.train_loader))
+print("DEBUG batch OK")
 
 class Trainer:
     """Training loop for Samuel."""
